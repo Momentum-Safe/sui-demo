@@ -1,0 +1,19 @@
+{
+  "name": "demo_multisig",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "scripts": {
+    "genesis": "sui genesis",
+    "node": "yarn genesis --force && sui start",
+    "faucet-node": "sui-test-validator",
+    "build": "sui move build -p ./move --skip-fetch-latest-git-deps",
+    "test": "sui move test -p ./move",
+    "ts": "ts-node"
+  },
+  "dependencies": {
+    "@mysten/sui.js": "^0.0.0-experimental-20221110011110",
+    "ts-node": "^10.9.1",
+    "typescript": "^4.8.4"
+  }
+}

@@ -1,0 +1,9 @@
+.idea
+node_modules
+yarn-error.log
+dist
+build
+.aptos
+*.log
+*.yaml*
+.DS_Store
