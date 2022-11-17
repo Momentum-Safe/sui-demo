@@ -4,7 +4,7 @@ import {MsafeContract} from "./call";
 // connect to local RPC server
 const provider = new JsonRpcProvider(Network.LOCAL);
 
-const msafe_contract = '0x96313cacf6bdcda9e5a86422ed6731cb34ff73cb';
+const msafe_contract = process.env.MSAFE as string;
 
 function createAccount():RawSigner {
     const keypair = new Ed25519Keypair();
