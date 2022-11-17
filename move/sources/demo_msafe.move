@@ -78,6 +78,7 @@ module demo_msafe::msafe {
             vec_set::insert(&mut owners_set, *owner);
             i = i + 1;
         };
+        assert!(vec_set::contains(&owners_set, *tx_context::sender(ctx)), 0);
         let msafe = Momentum {
             id: object::new(ctx),
             info: Info {
@@ -96,14 +97,14 @@ module demo_msafe::msafe {
 
     public entry fun create_txn(msafe: &mut Momentum, nonce: u64, to: address, asset_id: address, expiration: u64, ctx: &mut TxContext) {
         let txn_book = &mut msafe.txn_book;
-        assert!(nonce >= txn_book.min_sequence_number, 0);
-        if (nonce > txn_book.max_sequence_number) {
+        assert!(nonce >= txn_book.min_sequence_number, 10);
+        if (nonce >= txn_book.max_sequence_number) {
             txn_book.max_sequence_number = txn_book.max_sequence_number + 1;
         };
-        assert!(nonce < txn_book.max_sequence_number, 0);
+        assert!(nonce < txn_book.max_sequence_number, 20);
 
         let creator = tx_context::sender(ctx);
-        assert!(vec_set::contains(&msafe.info.owners, &creator), 0);
+        assert!(vec_set::contains(&msafe.info.owners, &creator), 30);
         let txn = Transaction {
             creator,
             to,
@@ -115,7 +116,7 @@ module demo_msafe::msafe {
         vector::append(&mut txid, bcs::to_bytes(&nonce));
         if (table::contains(&txn_book.pendings, txid)) {
             let txn = table::remove(&mut txn_book.pendings, txid);
-            assert!(creator == txn.creator, 0);
+            assert!(creator == txn.creator, 40);
         };
         table::add(&mut txn_book.pendings, txid, txn);
     }
