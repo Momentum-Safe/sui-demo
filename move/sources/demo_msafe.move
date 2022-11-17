@@ -78,7 +78,7 @@ module demo_msafe::msafe {
             vec_set::insert(&mut owners_set, *owner);
             i = i + 1;
         };
-        assert!(vec_set::contains(&owners_set, *tx_context::sender(ctx)), 0);
+        assert!(vec_set::contains(&owners_set, &tx_context::sender(ctx)), 0);
         let msafe = Momentum {
             id: object::new(ctx),
             info: Info {
