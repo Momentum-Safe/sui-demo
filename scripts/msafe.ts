@@ -16,7 +16,7 @@ function createAccounts(count:number): RawSigner[] {
 }
 
 async function main() {
-    console.log("----main")
+    console.log("----use msafe:", msafe_contract);
     const signer = createAccount();
     const owners = createAccounts(4);
     const address = await signer.getAddress();

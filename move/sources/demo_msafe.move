@@ -7,8 +7,10 @@ module demo_msafe::msafe {
     use sui::bcs;
     use sui::vec_set::{Self, VecSet};
     use sui::coin::{Self, Coin};
-    use sui::dynamic_field as field;
     use sui::priority_queue::{Self, PriorityQueue};
+    use std::type_name;
+    use std::ascii;
+    use sui::dynamic_field;
 
     const MAX_U64: u64 = 0xffffffffffffffff;
 
@@ -144,7 +146,7 @@ module demo_msafe::msafe {
         if (confirms < msafe.info.threshold) {
             return false
         };
-        let (_,txn_sn) = from_txid(txid);
+        let (_, txn_sn) = from_txid(txid);
         txn_sn == msafe.txn_book.min_sequence_number
     }
 
@@ -201,29 +203,43 @@ module demo_msafe::msafe {
 
     public entry fun deposit<ASSET: key+store>(msafe: &mut Momentum, asset: ASSET) {
         let asset_key = object::id(&asset);
-        field::add(&mut msafe.id, asset_key, asset);
+        dynamic_field::add(&mut msafe.id, asset_key, asset);
     }
 
-    public entry fun deposit_to<T>(msafe: &mut Momentum, asset_id: address, asset: Coin<T>) {
-        let asset_key = object::id_from_address(asset_id);
-        let to_asset_coin = field::remove<ID, Coin<T>>(&mut msafe.id, asset_key);
-        coin::join(&mut to_asset_coin, asset);
-        deposit(msafe, to_asset_coin);
+    fun coin_key<T>():vector<u8> {
+        let asset_type = type_name::get<Coin<T>>();
+        *ascii::as_bytes(type_name::borrow_string(&asset_type))
+    }
+
+    public entry fun deposit_coin<T>(msafe: &mut Momentum, asset: Coin<T>) {
+        let asset_key = coin_key<T>();
+        if(!dynamic_field::exists_with_type<vector<u8>, Coin<T>>(&mut msafe.id, asset_key)) {
+            dynamic_field::add<vector<u8>, Coin<T>>(&mut msafe.id, asset_key, asset);
+        } else {
+            let merge_to = dynamic_field::borrow_mut<vector<u8>, Coin<T>>(&mut msafe.id, asset_key);
+            coin::join(merge_to, asset);
+        }
+    }
+
+    fun withdraw_coin<T>(msafe: &mut Momentum, amount: u64, ctx: &mut TxContext): Coin<T> {
+        let asset_key = coin_key<T>();
+        let asset_coin = dynamic_field::borrow_mut<vector<u8>, Coin<T>>(&mut msafe.id, asset_key);
+        coin::split(asset_coin, amount, ctx)
     }
 
     fun withdraw<ASSET: key+store>(msafe: &mut Momentum, asset_id: address): ASSET {
         let asset_key = object::id_from_address(asset_id);
-        field::remove(&mut msafe.id, asset_key)
+        dynamic_field::remove(&mut msafe.id, asset_key)
     }
 
     public fun exist<ASSET: key+store>(msafe: &Momentum, asset_id: address): bool {
         let asset_key = object::id_from_address(asset_id);
-        field::exists_with_type<ID, ASSET>(&msafe.id, asset_key)
+        dynamic_field::exists_with_type<ID, ASSET>(&msafe.id, asset_key)
     }
 
     fun split_coins<T>(msafe: &mut Momentum, split_coin_id: address, split_amounts: vector<u64>, ctx: &mut TxContext) {
         let split_asset_key = object::id_from_address(split_coin_id);
-        let split_asset = field::remove<ID, Coin<T>>(&mut msafe.id, split_asset_key);
+        let split_asset = dynamic_field::remove<ID, Coin<T>>(&mut msafe.id, split_asset_key);
         let i = 0;
         while (i < vector::length(&split_amounts)) {
             let split_amount = vector::borrow(&split_amounts, i);
@@ -240,11 +256,11 @@ module demo_msafe::msafe {
 
     fun merge_coins<T>(msafe: &mut Momentum, coin_ids: vector<address>) {
         let retain_key = object::id_from_address(*vector::borrow(&coin_ids, 0));
-        let retain_coin = field::remove<ID, Coin<T>>(&mut msafe.id, retain_key);
+        let retain_coin = dynamic_field::remove<ID, Coin<T>>(&mut msafe.id, retain_key);
         let i = 1;
         while (i < vector::length(&coin_ids)) {
             let asset_key = object::id_from_address(*vector::borrow(&coin_ids, i));
-            let asset_coin = field::remove<ID, Coin<T>>(&mut msafe.id, asset_key);
+            let asset_coin = dynamic_field::remove<ID, Coin<T>>(&mut msafe.id, asset_key);
             coin::join(&mut retain_coin, asset_coin);
             i = i + 1;
         };
