@@ -201,14 +201,20 @@ module demo_msafe::msafe {
         execute_txn_internal<ASSET>(msafe, txid);
     }
 
-    public entry fun deposit<ASSET: key+store>(msafe: &mut Momentum, asset: ASSET) {
-        let asset_key = object::id(&asset);
-        dynamic_field::add(&mut msafe.id, asset_key, asset);
-    }
-
     fun coin_key<T>():vector<u8> {
         let asset_type = type_name::get<Coin<T>>();
         *ascii::as_bytes(type_name::borrow_string(&asset_type))
+    }
+
+
+    public fun exist_coin<T>(msafe: &Momentum): (bool, u64) {
+        let asset_key = coin_key<T>();
+        if (dynamic_field::exists_with_type<vector<u8>, Coin<T>>(&msafe.id, asset_key)) {
+            (false,0)
+        }else {
+            let asset_coin = dynamic_field::borrow<vector<u8>, Coin<T>>(&msafe.id, asset_key);
+            (true, coin::value(asset_coin))
+        }
     }
 
     public entry fun deposit_coin<T>(msafe: &mut Momentum, asset: Coin<T>) {
@@ -225,6 +231,11 @@ module demo_msafe::msafe {
         let asset_key = coin_key<T>();
         let asset_coin = dynamic_field::borrow_mut<vector<u8>, Coin<T>>(&mut msafe.id, asset_key);
         coin::split(asset_coin, amount, ctx)
+    }
+
+    public entry fun deposit<ASSET: key+store>(msafe: &mut Momentum, asset: ASSET) {
+        let asset_key = object::id(&asset);
+        dynamic_field::add(&mut msafe.id, asset_key, asset);
     }
 
     fun withdraw<ASSET: key+store>(msafe: &mut Momentum, asset_id: address): ASSET {
