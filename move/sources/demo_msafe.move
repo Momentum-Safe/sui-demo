@@ -7,15 +7,10 @@ module demo_msafe::msafe {
     use sui::bcs;
     use sui::vec_set::{Self, VecSet};
     use sui::coin::{Self, Coin};
-    use sui::dynamic_field;
+    use sui::dynamic_field as field;
+    use sui::priority_queue::{Self, PriorityQueue};
 
-    /*
-        1. create m-wallet
-        2. accept m-wallet
-        3. init txn
-        4. confirm txn
-        5. exec txn
-    */
+    const MAX_U64: u64 = 0xffffffffffffffff;
 
     /// Data structure stored for each momentum safe wallet, including:
     ///     1. momentum safe info (owners, public keys, threshold, e.t.c.)
@@ -46,6 +41,7 @@ module demo_msafe::msafe {
         // This parameter is updated when adding new transaction,
         // and is used in stale transaction pruning.
         max_sequence_number: u64,
+        txids: PriorityQueue<address>,
         // A map from transaction payload hash to the Transaction information.
         // Storing the detailed information about the pending transaction, where
         // the index transaction hashes can be obtained from `tx_hashes`.
@@ -89,6 +85,7 @@ module demo_msafe::msafe {
             txn_book: TxnBook {
                 min_sequence_number: 0,
                 max_sequence_number: 0,
+                txids: priority_queue::new(vector::empty()),
                 pendings: table::new(ctx)
             }
         };
@@ -112,13 +109,13 @@ module demo_msafe::msafe {
             expiration,
             confirms: vec_set::singleton(creator)
         };
-        let txid = bcs::to_bytes(&creator);
-        vector::append(&mut txid, bcs::to_bytes(&nonce));
+        let txid = to_txid(creator, nonce);
         if (table::contains(&txn_book.pendings, txid)) {
             let txn = table::remove(&mut txn_book.pendings, txid);
             assert!(creator == txn.creator, 40);
         };
         table::add(&mut txn_book.pendings, txid, txn);
+        insert_txid(txn_book, creator, nonce);
     }
 
     public entry fun confirm_txn(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
@@ -134,16 +131,59 @@ module demo_msafe::msafe {
         */
     }
 
+    public entry fun cancel_confirm(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
+        let txn_book = &mut msafe.txn_book;
+        let confirmer = tx_context::sender(ctx);
+        let txn = table::borrow_mut(&mut txn_book.pendings, txid);
+        vec_set::remove(&mut txn.confirms, &confirmer);
+    }
+
     public fun executable(msafe: &Momentum, txid: vector<u8>): bool {
         let txn = table::borrow(&msafe.txn_book.pendings, txid);
         let confirms = vec_set::size(&txn.confirms);
         if (confirms < msafe.info.threshold) {
             return false
         };
-        let deserializer = bcs::new(txid);
-        bcs::peel_address(&mut deserializer);
-        let txn_sn = bcs::peel_u64(&mut deserializer);
+        let (_,txn_sn) = from_txid(txid);
         txn_sn == msafe.txn_book.min_sequence_number
+    }
+
+    fun to_txid(creator: address, nonce: u64): vector<u8> {
+        let txid = bcs::to_bytes(&creator);
+        vector::append(&mut txid, bcs::to_bytes(&nonce));
+        txid
+    }
+
+    fun from_txid(txid: vector<u8>): (address, u64) {
+        let deserializer = bcs::new(txid);
+        let creator = bcs::peel_address(&mut deserializer);
+        let nonce = bcs::peel_u64(&mut deserializer);
+        (creator, nonce)
+    }
+
+    fun insert_txid(txn_book: &mut TxnBook, creator: address, nonce: u64) {
+        let priority = MAX_U64 - nonce;
+        priority_queue::insert(&mut txn_book.txids, priority, creator);
+    }
+
+    fun remove_tx(txn_book: &mut TxnBook) {
+        // avoid priority_queue empty.
+        // priority_queue don't have a method to check it's length
+        if (txn_book.min_sequence_number < 2) {
+            return
+        };
+        let i = 0;
+        while (i < 64) {
+            i = i + 1;
+            let (priority, creator) = priority_queue::pop_max(&mut txn_book.txids);
+            let nonce = MAX_U64 - priority;
+            if (nonce == txn_book.min_sequence_number - 1) {
+                priority_queue::insert(&mut txn_book.txids, priority, creator);
+                break
+            };
+            let txid = to_txid(creator, nonce);
+            table::remove(&mut txn_book.pendings, txid);
+        };
     }
 
     fun execute_txn_internal<ASSET: key+store>(msafe: &mut Momentum, txid: vector<u8>) {
@@ -151,6 +191,7 @@ module demo_msafe::msafe {
         let txn = table::remove(&mut msafe.txn_book.pendings, txid);
         let asset = withdraw<ASSET>(msafe, txn.asset_id);
         transfer::transfer(asset, txn.to);
+        remove_tx(&mut msafe.txn_book);
     }
 
     public entry fun execute_txn<ASSET: key+store>(msafe: &mut Momentum, txid: vector<u8>) {
@@ -160,31 +201,31 @@ module demo_msafe::msafe {
 
     public entry fun deposit<ASSET: key+store>(msafe: &mut Momentum, asset: ASSET) {
         let asset_key = object::id(&asset);
-        dynamic_field::add(&mut msafe.id, asset_key, asset);
+        field::add(&mut msafe.id, asset_key, asset);
     }
 
     public entry fun deposit_to<T>(msafe: &mut Momentum, asset_id: address, asset: Coin<T>) {
         let asset_key = object::id_from_address(asset_id);
-        let to_asset_coin = dynamic_field::remove<ID, Coin<T>>(&mut msafe.id, asset_key);
+        let to_asset_coin = field::remove<ID, Coin<T>>(&mut msafe.id, asset_key);
         coin::join(&mut to_asset_coin, asset);
         deposit(msafe, to_asset_coin);
     }
 
     fun withdraw<ASSET: key+store>(msafe: &mut Momentum, asset_id: address): ASSET {
         let asset_key = object::id_from_address(asset_id);
-        dynamic_field::remove(&mut msafe.id, asset_key)
+        field::remove(&mut msafe.id, asset_key)
     }
 
     public fun exist<ASSET: key+store>(msafe: &Momentum, asset_id: address): bool {
         let asset_key = object::id_from_address(asset_id);
-        dynamic_field::exists_with_type<ID, ASSET>(&msafe.id, asset_key)
+        field::exists_with_type<ID, ASSET>(&msafe.id, asset_key)
     }
 
     fun split_coins<T>(msafe: &mut Momentum, split_coin_id: address, split_amounts: vector<u64>, ctx: &mut TxContext) {
         let split_asset_key = object::id_from_address(split_coin_id);
-        let split_asset = dynamic_field::remove<ID, Coin<T>>(&mut msafe.id, split_asset_key);
+        let split_asset = field::remove<ID, Coin<T>>(&mut msafe.id, split_asset_key);
         let i = 0;
-        while(i < vector::length(&split_amounts)) {
+        while (i < vector::length(&split_amounts)) {
             let split_amount = vector::borrow(&split_amounts, i);
             let asset = coin::split(&mut split_asset, *split_amount, ctx);
             deposit(msafe, asset);
@@ -199,15 +240,14 @@ module demo_msafe::msafe {
 
     fun merge_coins<T>(msafe: &mut Momentum, coin_ids: vector<address>) {
         let retain_key = object::id_from_address(*vector::borrow(&coin_ids, 0));
-        let retain_coin = dynamic_field::remove<ID, Coin<T>>(&mut msafe.id, retain_key);
+        let retain_coin = field::remove<ID, Coin<T>>(&mut msafe.id, retain_key);
         let i = 1;
-        while(i < vector::length(&coin_ids)) {
+        while (i < vector::length(&coin_ids)) {
             let asset_key = object::id_from_address(*vector::borrow(&coin_ids, i));
-            let asset_coin = dynamic_field::remove<ID, Coin<T>>(&mut msafe.id, asset_key);
+            let asset_coin = field::remove<ID, Coin<T>>(&mut msafe.id, asset_key);
             coin::join(&mut retain_coin, asset_coin);
             i = i + 1;
         };
         deposit(msafe, retain_coin);
     }
-
 }
