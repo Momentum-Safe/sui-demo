@@ -7,10 +7,10 @@ module demo_msafe::msafe {
     use sui::bcs;
     use sui::vec_set::{Self, VecSet};
     use sui::coin::{Self, Coin};
-    use sui::priority_queue::{Self, PriorityQueue};
+    use demo_msafe::priority_queue::{Self, PriorityQueue};
     use std::type_name;
     use std::ascii;
-    use sui::dynamic_field;
+    use sui::dynamic_object_field;
 
     const MAX_U64: u64 = 0xffffffffffffffff;
 
@@ -61,8 +61,8 @@ module demo_msafe::msafe {
         // Payload of the transaction to be executed by the momentum safe wallet.
         // Can be an arbitrary transaction payload.
         to: address,
-        // Metadata stored on chain to serve as a transaction identifier or memo.
-        asset_id: address,
+        amount: u64,
+        asset_id: vector<u8>,
         expiration: u64,
         confirms: VecSet<address>,
     }
@@ -94,7 +94,7 @@ module demo_msafe::msafe {
         transfer::share_object(msafe);
     }
 
-    public entry fun create_txn(msafe: &mut Momentum, nonce: u64, to: address, asset_id: address, expiration: u64, ctx: &mut TxContext) {
+    public entry fun create_txn(msafe: &mut Momentum, nonce: u64, to: address, amount: u64, asset_id: vector<u8>, expiration: u64, ctx: &mut TxContext) {
         let txn_book = &mut msafe.txn_book;
         assert!(nonce >= txn_book.min_sequence_number, 10);
         if (nonce >= txn_book.max_sequence_number) {
@@ -107,6 +107,7 @@ module demo_msafe::msafe {
         let txn = Transaction {
             creator,
             to,
+            amount,
             asset_id,
             expiration,
             confirms: vec_set::singleton(creator)
@@ -169,22 +170,22 @@ module demo_msafe::msafe {
     }
 
     fun remove_tx(txn_book: &mut TxnBook) {
-        // avoid priority_queue empty.
-        // priority_queue don't have a method to check it's length
-        if (txn_book.min_sequence_number < 2) {
-            return
-        };
         let i = 0;
         while (i < 64) {
-            i = i + 1;
-            let (priority, creator) = priority_queue::pop_max(&mut txn_book.txids);
+            if(priority_queue::is_empty(&txn_book.txids)) {
+                break
+            };
+            let (priority, creator) = priority_queue::borrow_max(&txn_book.txids);
             let nonce = MAX_U64 - priority;
-            if (nonce == txn_book.min_sequence_number - 1) {
-                priority_queue::insert(&mut txn_book.txids, priority, creator);
+            if (nonce == txn_book.min_sequence_number) {
                 break
             };
             let txid = to_txid(creator, nonce);
-            table::remove(&mut txn_book.pendings, txid);
+            priority_queue::pop_max(&mut txn_book.txids);
+            if(table::contains(&txn_book.pendings, txid)) {
+                table::remove(&mut txn_book.pendings, txid);
+            };
+            i = i + 1;
         };
     }
 
@@ -196,9 +197,23 @@ module demo_msafe::msafe {
         remove_tx(&mut msafe.txn_book);
     }
 
+    fun execute_coin_txn_internal<T>(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
+        msafe.txn_book.min_sequence_number = msafe.txn_book.min_sequence_number + 1;
+        let txn = table::remove(&mut msafe.txn_book.pendings, txid);
+        let asset = withdraw_coin<T>(msafe, txn.amount, txn.asset_id, ctx);
+        transfer::transfer(asset, txn.to);
+        remove_tx(&mut msafe.txn_book);
+    }
+
+    /// execute transaction that withdraw arbitrary ASSET
     public entry fun execute_txn<ASSET: key+store>(msafe: &mut Momentum, txid: vector<u8>) {
         assert!(executable(msafe, txid), 0);
         execute_txn_internal<ASSET>(msafe, txid);
+    }
+    /// execute transaction that withdraw coin
+    public entry fun execute_coin_txn<T>(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
+        assert!(executable(msafe, txid), 0);
+        execute_coin_txn_internal<T>(msafe, txid, ctx);
     }
 
     fun coin_key<T>():vector<u8> {
@@ -206,75 +221,48 @@ module demo_msafe::msafe {
         *ascii::as_bytes(type_name::borrow_string(&asset_type))
     }
 
-
+    /// if a coin exists in msafe, also return its balance
     public fun exist_coin<T>(msafe: &Momentum): (bool, u64) {
         let asset_key = coin_key<T>();
-        if (dynamic_field::exists_with_type<vector<u8>, Coin<T>>(&msafe.id, asset_key)) {
+        if (dynamic_object_field::exists_with_type<vector<u8>, Coin<T>>(&msafe.id, asset_key)) {
             (false,0)
         }else {
-            let asset_coin = dynamic_field::borrow<vector<u8>, Coin<T>>(&msafe.id, asset_key);
+            let asset_coin = dynamic_object_field::borrow<vector<u8>, Coin<T>>(&msafe.id, asset_key);
             (true, coin::value(asset_coin))
         }
     }
-
+    /// deposit a coin to msafe
     public entry fun deposit_coin<T>(msafe: &mut Momentum, asset: Coin<T>) {
         let asset_key = coin_key<T>();
-        if(!dynamic_field::exists_with_type<vector<u8>, Coin<T>>(&mut msafe.id, asset_key)) {
-            dynamic_field::add<vector<u8>, Coin<T>>(&mut msafe.id, asset_key, asset);
+        if(!dynamic_object_field::exists_with_type<vector<u8>, Coin<T>>(&mut msafe.id, asset_key)) {
+            dynamic_object_field::add<vector<u8>, Coin<T>>(&mut msafe.id, asset_key, asset);
         } else {
-            let merge_to = dynamic_field::borrow_mut<vector<u8>, Coin<T>>(&mut msafe.id, asset_key);
+            let merge_to = dynamic_object_field::borrow_mut<vector<u8>, Coin<T>>(&mut msafe.id, asset_key);
             coin::join(merge_to, asset);
         }
     }
-
-    fun withdraw_coin<T>(msafe: &mut Momentum, amount: u64, ctx: &mut TxContext): Coin<T> {
+    /// withdraw a certain amount of a coin, the caller handls where the coin goes.
+    fun withdraw_coin<T>(msafe: &mut Momentum, amount: u64, asset_id: vector<u8>, ctx: &mut TxContext): Coin<T> {
         let asset_key = coin_key<T>();
-        let asset_coin = dynamic_field::borrow_mut<vector<u8>, Coin<T>>(&mut msafe.id, asset_key);
+        let asset_coin = dynamic_object_field::borrow_mut<vector<u8>, Coin<T>>(&mut msafe.id, asset_key);
+        assert!(asset_key == asset_id, 1000);
         coin::split(asset_coin, amount, ctx)
     }
-
+    /// deposit a ASSET to msafe
     public entry fun deposit<ASSET: key+store>(msafe: &mut Momentum, asset: ASSET) {
         let asset_key = object::id(&asset);
-        dynamic_field::add(&mut msafe.id, asset_key, asset);
+        dynamic_object_field::add(&mut msafe.id, asset_key, asset);
     }
 
-    fun withdraw<ASSET: key+store>(msafe: &mut Momentum, asset_id: address): ASSET {
-        let asset_key = object::id_from_address(asset_id);
-        dynamic_field::remove(&mut msafe.id, asset_key)
+    /// withdraw a ASSET from msafe, the caller handles where the asset goes.
+    fun withdraw<ASSET: key+store>(msafe: &mut Momentum, asset_id: vector<u8>): ASSET {
+        let asset_key = object::id_from_bytes(asset_id);
+        dynamic_object_field::remove(&mut msafe.id, asset_key)
     }
-
+    /// if a ASSET exists in msafe
     public fun exist<ASSET: key+store>(msafe: &Momentum, asset_id: address): bool {
         let asset_key = object::id_from_address(asset_id);
-        dynamic_field::exists_with_type<ID, ASSET>(&msafe.id, asset_key)
+        dynamic_object_field::exists_with_type<ID, ASSET>(&msafe.id, asset_key)
     }
 
-    fun split_coins<T>(msafe: &mut Momentum, split_coin_id: address, split_amounts: vector<u64>, ctx: &mut TxContext) {
-        let split_asset_key = object::id_from_address(split_coin_id);
-        let split_asset = dynamic_field::remove<ID, Coin<T>>(&mut msafe.id, split_asset_key);
-        let i = 0;
-        while (i < vector::length(&split_amounts)) {
-            let split_amount = vector::borrow(&split_amounts, i);
-            let asset = coin::split(&mut split_asset, *split_amount, ctx);
-            deposit(msafe, asset);
-            i = i + 1;
-        };
-        if (coin::value(&split_asset) > 0) {
-            deposit(msafe, split_asset);
-        } else {
-            coin::destroy_zero(split_asset);
-        }
-    }
-
-    fun merge_coins<T>(msafe: &mut Momentum, coin_ids: vector<address>) {
-        let retain_key = object::id_from_address(*vector::borrow(&coin_ids, 0));
-        let retain_coin = dynamic_field::remove<ID, Coin<T>>(&mut msafe.id, retain_key);
-        let i = 1;
-        while (i < vector::length(&coin_ids)) {
-            let asset_key = object::id_from_address(*vector::borrow(&coin_ids, i));
-            let asset_coin = dynamic_field::remove<ID, Coin<T>>(&mut msafe.id, asset_key);
-            coin::join(&mut retain_coin, asset_coin);
-            i = i + 1;
-        };
-        deposit(msafe, retain_coin);
-    }
 }
