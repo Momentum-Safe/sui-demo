@@ -146,18 +146,22 @@ module demo_msafe::msafe {
         vec_set
     }
 
+    fun check_info(info: &Info) {
+        assert!(vec_set::size(&info.owners) >= info.threshold && info.threshold > 0, 0);
+    }
+
     public entry fun create_mafe(owners: vector<address>, threshold: u64, metadata: vector<u8>, ctx: &mut TxContext) {
-        assert!(vector::length(&owners) >= threshold && threshold > 0, 0);
-        let owners_set = to_vec_set(owners);
-        assert!(vec_set::contains(&owners_set, &tx_context::sender(ctx)), 0);
+        let info = Info {
+            version: 0,
+            owners: to_vec_set(owners),
+            threshold,
+            metadata
+        };
+        check_info(&info);
+        assert!(vec_set::contains(&info.owners, &tx_context::sender(ctx)), 0);
         let msafe = Momentum {
             id: object::new(ctx),
-            info: Info {
-                version: 0,
-                owners: owners_set,
-                threshold,
-                metadata
-            },
+            info,
             txn_book: TxnBook {
                 min_sequence_number: 0,
                 max_sequence_number: 0,
@@ -278,6 +282,7 @@ module demo_msafe::msafe {
         msafe.info.owners = to_vec_set(payload.owners);
         msafe.info.threshold = payload.threshold;
         msafe.info.version = msafe.info.version + 1;
+        check_info(&msafe.info);
         forward_and_clean(&mut msafe.txn_book);
     }
 
@@ -310,9 +315,9 @@ module demo_msafe::msafe {
     }
 
     /// execute transaction that change owners and threshold of msafe
-    public entry fun execute_manage_txn<T>(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
+    public entry fun execute_manage_txn(msafe: &mut Momentum, txid: vector<u8>) {
         assert!(executable(msafe, txid), 0);
-        execute_coin_withdraw_internal<T>(msafe, txid, ctx);
+        execute_owner_change_internal(msafe, txid);
     }
 
     fun coin_key<T>():vector<u8> {

@@ -32,13 +32,24 @@ export class MsafeContract extends SuiContract {
         return super.call('deposit', [asset_type], [msafe, asset])
     }
 
-    async create_txn(msafe: string, nonce: bigint|string|number, to: string, asset_id: string, expiration: number) {
-        return super.call('create_txn', [], [msafe, nonce.toString(), to, asset_id, expiration]);
+    async deposit_coin(msafe: string, asset: string, coin_typeT:string) {
+        return super.call('deposit_coin', [coin_typeT], [msafe, asset])
     }
+
+    async create_txn(msafe: string, nonce: bigint|string|number, type: bigint|string|number, payload: string, expiration: number) {
+        return super.call('create_txn', [], [msafe, nonce.toString(), type.toString(), payload, expiration]);
+    }
+
     async confirm_txn(msafe: string, txid: string) {
         return super.call('confirm_txn', [], [msafe, txid]);
     }
-    async execute_txn(msafe: string, txid: string, asset_type:string) {
-        return super.call('execute_txn', [asset_type], [msafe, txid]);
+    async execute_asset_txn(msafe: string, txid: string, asset_type:string) {
+        return super.call('execute_asset_txn', [asset_type], [msafe, txid]);
+    }
+    async execute_coin_txn(msafe: string, txid: string, coin_typeT:string) {
+        return super.call('execute_coin_txn', [coin_typeT], [msafe, txid]);
+    }
+    async execute_manage_txn(msafe: string, txid: string) {
+        return super.call('execute_manage_txn', [], [msafe, txid]);
     }
 }
