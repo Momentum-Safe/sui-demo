@@ -26,6 +26,8 @@ module demo_msafe::msafe {
     /// Basic information of multi-sig wallet.
     /// Including owners, public keys, threshold, and wallet name (as metadata).
     struct Info has store, copy, drop {
+        // version of msafe
+        version: u64,
         // vector of owners
         owners: VecSet<address>,
         // signing threshold
@@ -50,6 +52,30 @@ module demo_msafe::msafe {
         pendings: Table<vector<u8>, Transaction>,
     }
 
+    struct PayloadAssetWithdraw has drop {
+        to: address,
+        asset_id: address,
+    }
+
+    struct PayloadCoinWithdraw has drop {
+        to: address,
+        coin_type: vector<u8>,
+        amount: u64,
+    }
+
+    struct PayloadOwnerChange has drop {
+        owners: vector<address>,
+        threshold: u64,
+    }
+
+    const PAYLOAD_ASSET_WITHDRAW:u64 = 1;
+    const PAYLOAD_COIN_WITHDRAW:u64 = 2;
+    const PAYLOAD_OWNER_CHANGE:u64 = 3;
+    struct Payload has store, copy, drop {
+        type: u64,
+        payload: vector<u8>,
+    }
+
     /// Transaction includes all information needed for a certain transaction
     /// to be executed by the momentum safe wallet, including payload, metadata,
     /// and signatures.
@@ -57,29 +83,77 @@ module demo_msafe::msafe {
     /// added when other owners call addSignature. The transaction is ready to
     /// be sent when number of signatures reaches threshold - 1.
     struct Transaction has store, drop, copy {
+        version: u64,
         creator: address,
         // Payload of the transaction to be executed by the momentum safe wallet.
         // Can be an arbitrary transaction payload.
-        to: address,
-        amount: u64,
-        asset_id: vector<u8>,
+        payload: Payload,
         expiration: u64,
         confirms: VecSet<address>,
     }
 
-    public entry fun create_mafe(owners: vector<address>, threshold: u64, metadata: vector<u8>, ctx: &mut TxContext) {
-        assert!(vector::length(&owners) >= threshold && threshold > 0, 0);
-        let owners_set = vec_set::empty<address>();
+    fun deserialize_asset_withdraw(payload: vector<u8>): PayloadAssetWithdraw {
+        let deserializer = bcs::new(payload);
+        let payload = PayloadAssetWithdraw{
+            to: bcs::peel_address(&mut deserializer),
+            asset_id: bcs::peel_address(&mut deserializer),
+        };
+        assert!(vector::is_empty(&bcs::into_remainder_bytes(deserializer)), 0);
+        payload
+    }
+
+    fun deserialize_coin_withdraw(payload: vector<u8>): PayloadCoinWithdraw {
+        let deserializer = bcs::new(payload);
+        let payload = PayloadCoinWithdraw{
+            to: bcs::peel_address(&mut deserializer),
+            coin_type: bcs::peel_vec_u8(&mut deserializer),
+            amount: bcs::peel_u64(&mut deserializer),
+        };
+        assert!(vector::is_empty(&bcs::into_remainder_bytes(deserializer)), 0);
+        payload
+    }
+
+    fun deserialize_owner_change(payload: vector<u8>): PayloadOwnerChange {
+        let deserializer = bcs::new(payload);
+        let payload = PayloadOwnerChange{
+            owners: bcs::peel_vec_address(&mut deserializer),
+            threshold: bcs::peel_u64(&mut deserializer),
+        };
+        assert!(vector::is_empty(&bcs::into_remainder_bytes(deserializer)), 0);
+        payload
+    }
+
+    fun payload_sanity_check(payload: &Payload) {
+        if(payload.type == PAYLOAD_ASSET_WITHDRAW) {
+            deserialize_asset_withdraw(payload.payload);
+        } else if (payload.type == PAYLOAD_COIN_WITHDRAW) {
+            deserialize_coin_withdraw(payload.payload);
+        } else if (payload.type == PAYLOAD_OWNER_CHANGE) {
+            deserialize_owner_change(payload.payload);
+        } else {
+            abort 0
+        }
+    }
+
+    fun to_vec_set<T: copy+drop>(vec: vector<T>): VecSet<T> {
+        let vec_set = vec_set::empty<T>();
         let i = 0;
-        while (i < vector::length(&owners)) {
-            let owner = vector::borrow(&owners, i);
-            vec_set::insert(&mut owners_set, *owner);
+        while (i < vector::length(&vec)) {
+            let elem = vector::borrow(&vec, i);
+            vec_set::insert(&mut vec_set, *elem);
             i = i + 1;
         };
+        vec_set
+    }
+
+    public entry fun create_mafe(owners: vector<address>, threshold: u64, metadata: vector<u8>, ctx: &mut TxContext) {
+        assert!(vector::length(&owners) >= threshold && threshold > 0, 0);
+        let owners_set = to_vec_set(owners);
         assert!(vec_set::contains(&owners_set, &tx_context::sender(ctx)), 0);
         let msafe = Momentum {
             id: object::new(ctx),
             info: Info {
+                version: 0,
                 owners: owners_set,
                 threshold,
                 metadata
@@ -94,7 +168,7 @@ module demo_msafe::msafe {
         transfer::share_object(msafe);
     }
 
-    public entry fun create_txn(msafe: &mut Momentum, nonce: u64, to: address, amount: u64, asset_id: vector<u8>, expiration: u64, ctx: &mut TxContext) {
+    public entry fun create_txn(msafe: &mut Momentum, nonce: u64, type: u64, payload: vector<u8>, expiration: u64, ctx: &mut TxContext) {
         let txn_book = &mut msafe.txn_book;
         assert!(nonce >= txn_book.min_sequence_number, 10);
         if (nonce >= txn_book.max_sequence_number) {
@@ -104,11 +178,15 @@ module demo_msafe::msafe {
 
         let creator = tx_context::sender(ctx);
         assert!(vec_set::contains(&msafe.info.owners, &creator), 30);
+        let payload =  Payload{
+            type,
+            payload,
+        };
+        payload_sanity_check(&payload);
         let txn = Transaction {
+            version: msafe.info.version,
             creator,
-            to,
-            amount,
-            asset_id,
+            payload,
             expiration,
             confirms: vec_set::singleton(creator)
         };
@@ -126,6 +204,7 @@ module demo_msafe::msafe {
         let confirmer = tx_context::sender(ctx);
         assert!(vec_set ::contains(&msafe.info.owners, &confirmer), 0);
         let txn = table::borrow_mut(&mut txn_book.pendings, txid);
+        assert!(txn.version == msafe.info.version, 0);
         vec_set::insert(&mut txn.confirms, confirmer);
         /*
         if (executable(msafe, txid)) {
@@ -143,6 +222,9 @@ module demo_msafe::msafe {
 
     public fun executable(msafe: &Momentum, txid: vector<u8>): bool {
         let txn = table::borrow(&msafe.txn_book.pendings, txid);
+        if (txn.version != msafe.info.version) {
+            return false
+        };
         let confirms = vec_set::size(&txn.confirms);
         if (confirms < msafe.info.threshold) {
             return false
@@ -169,7 +251,8 @@ module demo_msafe::msafe {
         priority_queue::insert(&mut txn_book.txids, priority, creator);
     }
 
-    fun remove_tx(txn_book: &mut TxnBook) {
+    fun forward_and_clean(txn_book: &mut TxnBook) {
+        txn_book.min_sequence_number = txn_book.min_sequence_number + 1;
         let i = 0;
         while (i < 64) {
             if(priority_queue::is_empty(&txn_book.txids)) {
@@ -189,31 +272,47 @@ module demo_msafe::msafe {
         };
     }
 
-    fun execute_txn_internal<ASSET: key+store>(msafe: &mut Momentum, txid: vector<u8>) {
-        msafe.txn_book.min_sequence_number = msafe.txn_book.min_sequence_number + 1;
+    fun execute_owner_change_internal(msafe: &mut Momentum, txid: vector<u8>) {
         let txn = table::remove(&mut msafe.txn_book.pendings, txid);
-        let asset = withdraw<ASSET>(msafe, txn.asset_id);
-        transfer::transfer(asset, txn.to);
-        remove_tx(&mut msafe.txn_book);
+        let payload = deserialize_owner_change(txn.payload.payload);
+        msafe.info.owners = to_vec_set(payload.owners);
+        msafe.info.threshold = payload.threshold;
+        msafe.info.version = msafe.info.version + 1;
+        forward_and_clean(&mut msafe.txn_book);
     }
 
-    fun execute_coin_txn_internal<T>(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
-        msafe.txn_book.min_sequence_number = msafe.txn_book.min_sequence_number + 1;
+    fun execute_asset_withdraw_internal<ASSET: key+store>(msafe: &mut Momentum, txid: vector<u8>) {
         let txn = table::remove(&mut msafe.txn_book.pendings, txid);
-        let asset = withdraw_coin<T>(msafe, txn.amount, txn.asset_id, ctx);
-        transfer::transfer(asset, txn.to);
-        remove_tx(&mut msafe.txn_book);
+
+        let payload = deserialize_asset_withdraw(txn.payload.payload);
+        let asset = withdraw<ASSET>(msafe, payload.asset_id);
+        transfer::transfer(asset, payload.to);
+        forward_and_clean(&mut msafe.txn_book);
+    }
+
+    fun execute_coin_withdraw_internal<T>(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
+        let txn = table::remove(&mut msafe.txn_book.pendings, txid);
+        let payload = deserialize_coin_withdraw(txn.payload.payload);
+        let asset = withdraw_coin<T>(msafe, payload.amount, payload.coin_type, ctx);
+        transfer::transfer(asset, payload.to);
+        forward_and_clean(&mut msafe.txn_book);
     }
 
     /// execute transaction that withdraw arbitrary ASSET
-    public entry fun execute_txn<ASSET: key+store>(msafe: &mut Momentum, txid: vector<u8>) {
+    public entry fun execute_asset_txn<ASSET: key+store>(msafe: &mut Momentum, txid: vector<u8>) {
         assert!(executable(msafe, txid), 0);
-        execute_txn_internal<ASSET>(msafe, txid);
+        execute_asset_withdraw_internal<ASSET>(msafe, txid);
     }
     /// execute transaction that withdraw coin
     public entry fun execute_coin_txn<T>(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
         assert!(executable(msafe, txid), 0);
-        execute_coin_txn_internal<T>(msafe, txid, ctx);
+        execute_coin_withdraw_internal<T>(msafe, txid, ctx);
+    }
+
+    /// execute transaction that change owners and threshold of msafe
+    public entry fun execute_manage_txn<T>(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
+        assert!(executable(msafe, txid), 0);
+        execute_coin_withdraw_internal<T>(msafe, txid, ctx);
     }
 
     fun coin_key<T>():vector<u8> {
@@ -255,8 +354,8 @@ module demo_msafe::msafe {
     }
 
     /// withdraw a ASSET from msafe, the caller handles where the asset goes.
-    fun withdraw<ASSET: key+store>(msafe: &mut Momentum, asset_id: vector<u8>): ASSET {
-        let asset_key = object::id_from_bytes(asset_id);
+    fun withdraw<ASSET: key+store>(msafe: &mut Momentum, asset_id: address): ASSET {
+        let asset_key = object::id_from_address(asset_id);
         dynamic_object_field::remove(&mut msafe.id, asset_key)
     }
     /// if a ASSET exists in msafe
