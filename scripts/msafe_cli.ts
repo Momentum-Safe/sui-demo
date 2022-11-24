@@ -1,14 +1,12 @@
-import {bcs, Ed25519Keypair, JsonRpcProvider, Network, RawSigner} from '@mysten/sui.js';
+import {bcs, JsonRpcProvider, Network} from '@mysten/sui.js';
 import {MsafeContract} from "./lib/msafe_contract";
 import {program} from "commander";
 import {publish} from "./publish";
 import {faucet} from "./faucet";
-import {decodeStr} from "@mysten/bcs";
 import {createAccounts, saveAccounts, loadAccount} from "./lib/wallet";
 import {PayloadType, PayloadTypeLiteral} from "./lib/payload";
 import "./lib/payload";
 import {log_tx} from "./lib/utils";
-import {Momentum, Transaction} from "./lib/objects";
 
 program
     .name('msafe-wallet')
@@ -84,7 +82,6 @@ MsafeCmd.command('create')
         console.log("msafe wallet id:", MomentumObject.objectId);
     });
 
-
 MsafeCmd.command('deposit')
     .description('Deposit coin')
     .option('--keydir <path>', 'Path to directory to store secret keys', './.key')
@@ -117,14 +114,14 @@ MsafeCmd.command('withdraw_init')
         const signer = await loadAccount(options.keydir, options.account, provider);
         const msafeContract = new MsafeContract(options.msafe, 'msafe', signer);
         const to = options.to || options.account;
-        const walletInfo: any = await provider.getObject(walletID);
-        const msafeObject = walletInfo.details.data as Momentum;
+        const msafeObject = await MsafeContract.getMomentumInfo(walletID, provider);
         const nonce = msafeObject.fields.txn_book.fields.max_sequence_number;
-        const payload = '0x' + bcs.ser('PayloadAssetWithdraw', {
+        const payloadType = PayloadType.AssetWithdraw;
+        const payload = '0x' + bcs.ser(PayloadTypeLiteral[payloadType], {
             to,
             asset_id: options.asset_id,
         }).toString('hex');
-        const txid: any = await msafeContract.create_txn(walletID, nonce, PayloadType.AssetWithdraw, payload, 0);
+        const txid: any = await msafeContract.create_txn(walletID, nonce, payloadType, payload, 0);
         log_tx(txid);
         //const msafeTx = txid.EffectsCert.effects.effects.created[0];
         const nonceBuf = Buffer.alloc(8);
@@ -173,7 +170,6 @@ MsafeCmd.command('withdraw_execute')
         const txid = await msafeContract.execute_asset_txn(walletID, options.id, (asset.details as any).data.type)
         log_tx(txid);
     });
-
 
 MsafeCmd.command('wallet')
     .description('get msafe wallet details')
