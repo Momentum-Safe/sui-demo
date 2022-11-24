@@ -98,7 +98,7 @@ module demo_msafe::msafe {
             to: bcs::peel_address(&mut deserializer),
             asset_id: bcs::peel_address(&mut deserializer),
         };
-        assert!(vector::is_empty(&bcs::into_remainder_bytes(deserializer)), 0);
+        assert!(vector::is_empty(&bcs::into_remainder_bytes(deserializer)), 100);
         payload
     }
 
@@ -109,7 +109,7 @@ module demo_msafe::msafe {
             coin_type: bcs::peel_vec_u8(&mut deserializer),
             amount: bcs::peel_u64(&mut deserializer),
         };
-        assert!(vector::is_empty(&bcs::into_remainder_bytes(deserializer)), 0);
+        assert!(vector::is_empty(&bcs::into_remainder_bytes(deserializer)), 101);
         payload
     }
 
@@ -119,7 +119,7 @@ module demo_msafe::msafe {
             owners: bcs::peel_vec_address(&mut deserializer),
             threshold: bcs::peel_u64(&mut deserializer),
         };
-        assert!(vector::is_empty(&bcs::into_remainder_bytes(deserializer)), 0);
+        assert!(vector::is_empty(&bcs::into_remainder_bytes(deserializer)), 102);
         payload
     }
 
@@ -131,7 +131,7 @@ module demo_msafe::msafe {
         } else if (payload.type == PAYLOAD_OWNER_CHANGE) {
             deserialize_owner_change(payload.payload);
         } else {
-            abort 0
+            abort 103
         }
     }
 
@@ -147,10 +147,10 @@ module demo_msafe::msafe {
     }
 
     fun check_info(info: &Info) {
-        assert!(vec_set::size(&info.owners) >= info.threshold && info.threshold > 0, 0);
+        assert!(vec_set::size(&info.owners) >= info.threshold && info.threshold > 0, 104);
     }
 
-    public entry fun create_mafe(owners: vector<address>, threshold: u64, metadata: vector<u8>, ctx: &mut TxContext) {
+    public entry fun create_msafe(owners: vector<address>, threshold: u64, metadata: vector<u8>, ctx: &mut TxContext) {
         let info = Info {
             version: 0,
             owners: to_vec_set(owners),
@@ -158,7 +158,7 @@ module demo_msafe::msafe {
             metadata
         };
         check_info(&info);
-        assert!(vec_set::contains(&info.owners, &tx_context::sender(ctx)), 0);
+        assert!(vec_set::contains(&info.owners, &tx_context::sender(ctx)), 105);
         let msafe = Momentum {
             id: object::new(ctx),
             info,
@@ -174,14 +174,14 @@ module demo_msafe::msafe {
 
     public entry fun create_txn(msafe: &mut Momentum, nonce: u64, type: u64, payload: vector<u8>, expiration: u64, ctx: &mut TxContext) {
         let txn_book = &mut msafe.txn_book;
-        assert!(nonce >= txn_book.min_sequence_number, 10);
+        assert!(nonce >= txn_book.min_sequence_number, 106);
         if (nonce >= txn_book.max_sequence_number) {
             txn_book.max_sequence_number = txn_book.max_sequence_number + 1;
         };
-        assert!(nonce < txn_book.max_sequence_number, 20);
+        assert!(nonce < txn_book.max_sequence_number, 107);
 
         let creator = tx_context::sender(ctx);
-        assert!(vec_set::contains(&msafe.info.owners, &creator), 30);
+        assert!(vec_set::contains(&msafe.info.owners, &creator), 108);
         let payload =  Payload{
             type,
             payload,
@@ -197,7 +197,7 @@ module demo_msafe::msafe {
         let txid = to_txid(creator, nonce);
         if (table::contains(&txn_book.pendings, txid)) {
             let txn = table::remove(&mut txn_book.pendings, txid);
-            assert!(creator == txn.creator, 40);
+            assert!(creator == txn.creator, 109);
         };
         table::add(&mut txn_book.pendings, txid, txn);
         insert_txid(txn_book, creator, nonce);
@@ -206,9 +206,9 @@ module demo_msafe::msafe {
     public entry fun confirm_txn(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
         let txn_book = &mut msafe.txn_book;
         let confirmer = tx_context::sender(ctx);
-        assert!(vec_set ::contains(&msafe.info.owners, &confirmer), 0);
+        assert!(vec_set ::contains(&msafe.info.owners, &confirmer), 110);
         let txn = table::borrow_mut(&mut txn_book.pendings, txid);
-        assert!(txn.version == msafe.info.version, 0);
+        assert!(txn.version == msafe.info.version, 111);
         vec_set::insert(&mut txn.confirms, confirmer);
         /*
         if (executable(msafe, txid)) {
@@ -305,18 +305,18 @@ module demo_msafe::msafe {
 
     /// execute transaction that withdraw arbitrary ASSET
     public entry fun execute_asset_txn<ASSET: key+store>(msafe: &mut Momentum, txid: vector<u8>) {
-        assert!(executable(msafe, txid), 0);
+        assert!(executable(msafe, txid), 200);
         execute_asset_withdraw_internal<ASSET>(msafe, txid);
     }
     /// execute transaction that withdraw coin
     public entry fun execute_coin_txn<T>(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
-        assert!(executable(msafe, txid), 0);
+        assert!(executable(msafe, txid), 201);
         execute_coin_withdraw_internal<T>(msafe, txid, ctx);
     }
 
     /// execute transaction that change owners and threshold of msafe
     public entry fun execute_manage_txn(msafe: &mut Momentum, txid: vector<u8>) {
-        assert!(executable(msafe, txid), 0);
+        assert!(executable(msafe, txid), 202);
         execute_owner_change_internal(msafe, txid);
     }
 
