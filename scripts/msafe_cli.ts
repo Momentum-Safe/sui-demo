@@ -5,17 +5,16 @@ import {publish} from "./publish";
 import {faucet} from "./faucet";
 import {createAccounts, saveAccounts, loadAccount} from "./lib/wallet";
 import {PayloadType, PayloadTypeLiteral} from "./lib/payload";
-import "./lib/payload";
 import {log_tx} from "./lib/utils";
 
 program
-    .name('msafe-wallet')
+    .name('msafe-cli')
     .description('CLI to interact with msafe contract')
     .version('0.0.1');
 
 
 program.command('object')
-    .description('get object')
+    .description('Get object')
     .argument('<id>', 'id of object')
     .option('-o --owns', 'get objects owned by this object')
     .action(async (id, options: any) => {
@@ -83,7 +82,7 @@ MsafeCmd.command('create')
     });
 
 MsafeCmd.command('deposit')
-    .description('Deposit coin')
+    .description('Deposit asset to a msafe wallet')
     .option('--keydir <path>', 'Path to directory to store secret keys', './.key')
     .option('--account <address>', 'account to use, omit use $ACCOUNT', process.env.ACCOUNT as string)
     .option('--msafe <address>', 'msafe contract address, omit use $MSAFE', process.env.MSAFE as string)
@@ -100,7 +99,7 @@ MsafeCmd.command('deposit')
     });
 
 MsafeCmd.command('withdraw_init')
-    .description('create a msafe transaction to withdraw asset')
+    .description('Create a msafe transaction to withdraw asset')
     .option('--keydir <path>', 'Path to directory to store secret keys', './.key')
     .option('--account <address>', 'account to use, omit use $ACCOUNT', process.env.ACCOUNT as string)
     .option('--msafe <address>', 'msafe contract address, omit use $MSAFE', process.env.MSAFE as string)
@@ -117,26 +116,52 @@ MsafeCmd.command('withdraw_init')
         const msafeObject = await MsafeContract.getMomentumInfo(walletID, provider);
         const nonce = msafeObject.fields.txn_book.fields.max_sequence_number;
         const payloadType = PayloadType.AssetWithdraw;
-        const payload = '0x' + bcs.ser(PayloadTypeLiteral[payloadType], {
+        const payload = {
             to,
             asset_id: options.asset_id,
-        }).toString('hex');
+        };
         const txid: any = await msafeContract.create_txn(walletID, nonce, payloadType, payload, 0);
         log_tx(txid);
-        //const msafeTx = txid.EffectsCert.effects.effects.created[0];
-        const nonceBuf = Buffer.alloc(8);
-        nonceBuf.writeBigInt64LE(BigInt(nonce));
-        const withdrawID = `0x${options.account}${nonceBuf.toString('hex')}`;
+        const withdrawID = MsafeContract.toMsafeTxID(options.account, nonce);
         console.log('withdrawID:', withdrawID)
     });
 
-MsafeCmd.command('withdraw_confirm')
-    .description('create a withdraw coin msafe transaction')
+
+MsafeCmd.command('changeOwner_init')
+    .description('Create a msafe transaction to change owners')
     .option('--keydir <path>', 'Path to directory to store secret keys', './.key')
     .option('--account <address>', 'account to use, omit use $ACCOUNT', process.env.ACCOUNT as string)
     .option('--msafe <address>', 'msafe contract address, omit use $MSAFE', process.env.MSAFE as string)
     .option('--network <NetworkType>', 'network to use, support LOCAL,DEVNET, omit use ($NETWORK || LOCAL)', process.env.NETWORK || Network.LOCAL)
-    .requiredOption('--id <HexString>', 'id of withdraw transaction')
+    .option('--walletID <HexString>', 'id of msafe wallet, omit use $WALLET', process.env.WALLET as string)
+    .argument('<owners>', "owners of msafe, separated with ','")
+    .argument('<threshold>', "threshold of msafe")
+    .action(async (owners: string, threshold, options) => {
+        const walletID = options.walletID;
+        const provider = new JsonRpcProvider(options.network.toUpperCase());
+        const signer = await loadAccount(options.keydir, options.account, provider);
+        const msafeContract = new MsafeContract(options.msafe, 'msafe', signer);
+        const to = options.to || options.account;
+        const msafeObject = await MsafeContract.getMomentumInfo(walletID, provider);
+        const nonce = msafeObject.fields.txn_book.fields.max_sequence_number;
+        const payloadType = PayloadType.OwnerChange;
+        const payload = {
+            owners: owners.split(','),
+            threshold
+        };
+        const txid: any = await msafeContract.create_txn(walletID, nonce, payloadType, payload, 0);
+        log_tx(txid);
+        const changeOwnerID = MsafeContract.toMsafeTxID(options.account, nonce);
+        console.log('changeOwnerID:', changeOwnerID);
+    });
+
+MsafeCmd.command('confirm')
+    .description('Confirm a msafe transaction')
+    .option('--keydir <path>', 'Path to directory to store secret keys', './.key')
+    .option('--account <address>', 'account to use, omit use $ACCOUNT', process.env.ACCOUNT as string)
+    .option('--msafe <address>', 'msafe contract address, omit use $MSAFE', process.env.MSAFE as string)
+    .option('--network <NetworkType>', 'network to use, support LOCAL,DEVNET, omit use ($NETWORK || LOCAL)', process.env.NETWORK || Network.LOCAL)
+    .requiredOption('--id <HexString>', 'id of msafe transaction')
     //.option('-e --execute', 'auto execute the transaction if has enough confirms')
     .option('--walletID <HexString>', 'id of msafe wallet, omit use $WALLET', process.env.WALLET as string)
     .action(async (options) => {
@@ -147,13 +172,13 @@ MsafeCmd.command('withdraw_confirm')
         log_tx(txid);
     });
 
-MsafeCmd.command('withdraw_execute')
-    .description('execute transaction to withdraw asset')
+MsafeCmd.command('execute')
+    .description('Execute a msafe transaction')
     .option('--keydir <path>', 'Path to directory to store secret keys', './.key')
     .option('--account <address>', 'account to use, omit use $ACCOUNT', process.env.ACCOUNT as string)
     .option('--msafe <address>', 'msafe contract address, omit use $MSAFE', process.env.MSAFE as string)
     .option('--network <NetworkType>', 'network to use, support LOCAL,DEVNET, omit use ($NETWORK || LOCAL)', process.env.NETWORK || Network.LOCAL)
-    .requiredOption('--id <HexString>', 'id of withdraw transaction')
+    .requiredOption('--id <HexString>', 'id of msafe transaction')
     .option('--walletID <HexString>', 'id of msafe wallet, omit use $WALLET', process.env.WALLET as string)
     .action(async (options) => {
         const walletID = options.walletID;
@@ -162,17 +187,22 @@ MsafeCmd.command('withdraw_execute')
         const msafeContract = new MsafeContract(options.msafe, 'msafe', signer);
         const pendings = await MsafeContract.getPendingTransactions(walletID, provider)
         const {tx: withdrawTx} = pendings.find(({id}) => Buffer.from(options.id.slice(2), 'hex').equals(id))!;
-        const payloadType = withdrawTx.fields.payload.fields.type;
+        const payloadType = Number(withdrawTx.fields.payload.fields.type);
         const payloadData = withdrawTx.fields.payload.fields.payload;
-        const payload = bcs.de('PayloadAssetWithdraw', payloadData, 'base64');
-        const asset_id = payload.asset_id;
-        const asset = await provider.getObject(asset_id);
-        const txid = await msafeContract.execute_asset_txn(walletID, options.id, (asset.details as any).data.type)
-        log_tx(txid);
+        if (payloadType == PayloadType.AssetWithdraw) {
+            const payload = MsafeContract.decodePayload(PayloadType.AssetWithdraw, payloadData);
+            const asset_id = payload.asset_id;
+            const asset = await provider.getObject(asset_id);
+            const txid = await msafeContract.execute_asset_txn(walletID, options.id, (asset.details as any).data.type)
+            log_tx(txid);
+        } else if (payloadType == PayloadType.OwnerChange) {
+            const txid = await msafeContract.execute_manage_txn(walletID, options.id);
+            log_tx(txid);
+        }
     });
 
 MsafeCmd.command('wallet')
-    .description('get msafe wallet details')
+    .description('Get msafe wallet details')
     .option('--msafe <address>', 'msafe contract address, omit use $MSAFE', process.env.MSAFE as string)
     .option('--network <NetworkType>', 'network to use, support LOCAL,DEVNET, omit use ($NETWORK || LOCAL)', process.env.NETWORK || Network.LOCAL)
     .option('--walletID <HexString>', 'id of msafe wallet, omit use $WALLET', process.env.WALLET as string)
@@ -184,7 +214,7 @@ MsafeCmd.command('wallet')
     });
 
 MsafeCmd.command('pendings')
-    .description('get pending transactions')
+    .description('Get pending transactions')
     .option('--msafe <address>', 'msafe contract address, omit use $MSAFE', process.env.MSAFE as string)
     .option('--network <NetworkType>', 'network to use, support LOCAL,DEVNET, omit use ($NETWORK || LOCAL)', process.env.NETWORK || Network.LOCAL)
     .option('--walletID <HexString>', 'id of msafe wallet, omit use $WALLET', process.env.WALLET as string)
@@ -195,13 +225,14 @@ MsafeCmd.command('pendings')
         console.log("pending tx size:", pendings.length);
         for (const pending of pendings) {
             console.log('-'.repeat(64))
-            console.log('txid:', Buffer.from(pending.id).toString('hex'));
-            console.log('creator:', Buffer.from(pending.id.subarray(0, 20)).toString('hex'));
+            console.log('txid:', '0x'+Buffer.from(pending.id).toString('hex'));
+            console.log('creator:', '0x'+Buffer.from(pending.id.subarray(0, 20)).toString('hex'));
             console.log('nonce:', Buffer.from(pending.id.subarray(20)).readBigInt64LE());
             console.log('tx:', JSON.stringify(pending.tx, undefined, 2));
-            const payloadType = PayloadTypeLiteral[Number(pending.tx.fields.payload.fields.type) as PayloadType];
-            console.log('payload type:', payloadType)
-            console.log('payload data:', bcs.de(payloadType, pending.tx.fields.payload.fields.payload, 'base64'));
+            const payloadType = Number(pending.tx.fields.payload.fields.type) as PayloadType;
+            const payloadData = pending.tx.fields.payload.fields.payload;
+            console.log('payload type:', PayloadTypeLiteral[payloadType]);
+            console.log('payload data:', MsafeContract.decodePayload(payloadType, payloadData));
         }
     });
 

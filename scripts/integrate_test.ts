@@ -1,10 +1,8 @@
 import {MsafeContract} from "./lib/msafe_contract";
-import {DEFAULT_NETWORK, default_provider} from "./lib/provider";
+import {default_provider} from "./lib/provider";
 import {createAccount, createAccounts} from "./lib/wallet";
 import {log_tx} from "./lib/utils";
-import {bcs} from "@mysten/sui.js";
 import {PayloadType} from "./lib/payload";
-import "./lib/payload";
 
 // connect to local RPC server
 const provider = default_provider;
@@ -44,11 +42,11 @@ async function main() {
     console.log('\n====================================================3. create_txn to withdraw asset');
     const receiver = createAccount();
     const receiver_address = await receiver.getAddress().then(addr => `0x${addr}`);
-    const asset_payload = bcs.ser('PayloadAssetWithdraw', {
+    const asset_payload = {
         to: receiver_address,
         asset_id: asset.reference.objectId,
-    }).toString('hex');
-    const create_txn_txid: any = await msafeContract.connect(owners[0]).create_txn(MomentumObject.objectId, 0, PayloadType.AssetWithdraw, `0x${asset_payload}`, Number(new Date()));
+    };
+    const create_txn_txid: any = await msafeContract.connect(owners[0]).create_txn(MomentumObject.objectId, 0, PayloadType.AssetWithdraw, asset_payload, Number(new Date()));
     log_tx(create_txn_txid);
 
     const doConfirms = async (creator: string, nonce: bigint) => {
@@ -91,12 +89,12 @@ async function main() {
     console.log('\n====================================================7. create_txn to withdraw coin');
 
     const fullCoinType = '0000000000000000000000000000000000000002::coin::Coin<0000000000000000000000000000000000000002::sui::SUI>';
-    const coin_payload = bcs.ser('PayloadCoinWithdraw', {
+    const coin_payload = {
         to: receiver_address,
         coin_type: Buffer.from(fullCoinType),
         amount: 1000,
-    }).toString('hex');
-    const create_coin_txn_txid: any = await msafeContract.connect(owners[0]).create_txn(MomentumObject.objectId, 1, PayloadType.CoinWithdraw, `0x${coin_payload}`, Number(new Date()));
+    };
+    const create_coin_txn_txid: any = await msafeContract.connect(owners[0]).create_txn(MomentumObject.objectId, 1, PayloadType.CoinWithdraw, coin_payload, Number(new Date()));
     log_tx(create_coin_txn_txid);
 
     console.log('\n====================================================8. confirm_txn to withdraw coin');
@@ -111,11 +109,11 @@ async function main() {
 
 
     console.log('\n====================================================10. create_txn to change owners');
-    const owner_change_payload = bcs.ser('PayloadOwnerChange', {
+    const owner_change_payload = {
         owners: owners_address.slice(1),
         threshold: owners_address.length - 1,
-    }).toString('hex');
-    const owner_chang_txn_txid: any = await msafeContract.connect(owners[0]).create_txn(MomentumObject.objectId, 2, PayloadType.OwnerChange, `0x${owner_change_payload}`, Number(new Date()));
+    };
+    const owner_chang_txn_txid: any = await msafeContract.connect(owners[0]).create_txn(MomentumObject.objectId, 2, PayloadType.OwnerChange, owner_change_payload, Number(new Date()));
     log_tx(owner_chang_txn_txid);
 
 

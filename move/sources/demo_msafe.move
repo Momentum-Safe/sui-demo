@@ -68,9 +68,10 @@ module demo_msafe::msafe {
         threshold: u64,
     }
 
-    const PAYLOAD_ASSET_WITHDRAW:u64 = 1;
-    const PAYLOAD_COIN_WITHDRAW:u64 = 2;
-    const PAYLOAD_OWNER_CHANGE:u64 = 3;
+    const PAYLOAD_ASSET_WITHDRAW: u64 = 1;
+    const PAYLOAD_COIN_WITHDRAW: u64 = 2;
+    const PAYLOAD_OWNER_CHANGE: u64 = 3;
+
     struct Payload has store, copy, drop {
         type: u64,
         payload: vector<u8>,
@@ -94,7 +95,7 @@ module demo_msafe::msafe {
 
     fun deserialize_asset_withdraw(payload: vector<u8>): PayloadAssetWithdraw {
         let deserializer = bcs::new(payload);
-        let payload = PayloadAssetWithdraw{
+        let payload = PayloadAssetWithdraw {
             to: bcs::peel_address(&mut deserializer),
             asset_id: bcs::peel_address(&mut deserializer),
         };
@@ -104,7 +105,7 @@ module demo_msafe::msafe {
 
     fun deserialize_coin_withdraw(payload: vector<u8>): PayloadCoinWithdraw {
         let deserializer = bcs::new(payload);
-        let payload = PayloadCoinWithdraw{
+        let payload = PayloadCoinWithdraw {
             to: bcs::peel_address(&mut deserializer),
             coin_type: bcs::peel_vec_u8(&mut deserializer),
             amount: bcs::peel_u64(&mut deserializer),
@@ -115,7 +116,7 @@ module demo_msafe::msafe {
 
     fun deserialize_owner_change(payload: vector<u8>): PayloadOwnerChange {
         let deserializer = bcs::new(payload);
-        let payload = PayloadOwnerChange{
+        let payload = PayloadOwnerChange {
             owners: bcs::peel_vec_address(&mut deserializer),
             threshold: bcs::peel_u64(&mut deserializer),
         };
@@ -124,7 +125,7 @@ module demo_msafe::msafe {
     }
 
     fun payload_sanity_check(payload: &Payload) {
-        if(payload.type == PAYLOAD_ASSET_WITHDRAW) {
+        if (payload.type == PAYLOAD_ASSET_WITHDRAW) {
             deserialize_asset_withdraw(payload.payload);
         } else if (payload.type == PAYLOAD_COIN_WITHDRAW) {
             deserialize_coin_withdraw(payload.payload);
@@ -182,7 +183,7 @@ module demo_msafe::msafe {
 
         let creator = tx_context::sender(ctx);
         assert!(vec_set::contains(&msafe.info.owners, &creator), 108);
-        let payload =  Payload{
+        let payload = Payload {
             type,
             payload,
         };
@@ -259,7 +260,7 @@ module demo_msafe::msafe {
         txn_book.min_sequence_number = txn_book.min_sequence_number + 1;
         let i = 0;
         while (i < 64) {
-            if(priority_queue::is_empty(&txn_book.txids)) {
+            if (priority_queue::is_empty(&txn_book.txids)) {
                 break
             };
             let (priority, creator) = priority_queue::borrow_max(&txn_book.txids);
@@ -269,7 +270,7 @@ module demo_msafe::msafe {
             };
             let txid = to_txid(creator, nonce);
             priority_queue::pop_max(&mut txn_book.txids);
-            if(table::contains(&txn_book.pendings, txid)) {
+            if (table::contains(&txn_book.pendings, txid)) {
                 table::remove(&mut txn_book.pendings, txid);
             };
             i = i + 1;
@@ -308,6 +309,7 @@ module demo_msafe::msafe {
         assert!(executable(msafe, txid), 200);
         execute_asset_withdraw_internal<ASSET>(msafe, txid);
     }
+
     /// execute transaction that withdraw coin
     public entry fun execute_coin_txn<T>(msafe: &mut Momentum, txid: vector<u8>, ctx: &mut TxContext) {
         assert!(executable(msafe, txid), 201);
@@ -320,7 +322,7 @@ module demo_msafe::msafe {
         execute_owner_change_internal(msafe, txid);
     }
 
-    fun coin_key<T>():vector<u8> {
+    fun coin_key<T>(): vector<u8> {
         let asset_type = type_name::get<Coin<T>>();
         *ascii::as_bytes(type_name::borrow_string(&asset_type))
     }
@@ -329,22 +331,24 @@ module demo_msafe::msafe {
     public fun exist_coin<T>(msafe: &Momentum): (bool, u64) {
         let asset_key = coin_key<T>();
         if (dynamic_object_field::exists_with_type<vector<u8>, Coin<T>>(&msafe.id, asset_key)) {
-            (false,0)
+            (false, 0)
         }else {
             let asset_coin = dynamic_object_field::borrow<vector<u8>, Coin<T>>(&msafe.id, asset_key);
             (true, coin::value(asset_coin))
         }
     }
+
     /// deposit a coin to msafe
     public entry fun deposit_coin<T>(msafe: &mut Momentum, asset: Coin<T>) {
         let asset_key = coin_key<T>();
-        if(!dynamic_object_field::exists_with_type<vector<u8>, Coin<T>>(&mut msafe.id, asset_key)) {
+        if (!dynamic_object_field::exists_with_type<vector<u8>, Coin<T>>(&mut msafe.id, asset_key)) {
             dynamic_object_field::add<vector<u8>, Coin<T>>(&mut msafe.id, asset_key, asset);
         } else {
             let merge_to = dynamic_object_field::borrow_mut<vector<u8>, Coin<T>>(&mut msafe.id, asset_key);
             coin::join(merge_to, asset);
         }
     }
+
     /// withdraw a certain amount of a coin, the caller handls where the coin goes.
     fun withdraw_coin<T>(msafe: &mut Momentum, amount: u64, asset_id: vector<u8>, ctx: &mut TxContext): Coin<T> {
         let asset_key = coin_key<T>();
@@ -352,6 +356,7 @@ module demo_msafe::msafe {
         assert!(asset_key == asset_id, 1000);
         coin::split(asset_coin, amount, ctx)
     }
+
     /// deposit a ASSET to msafe
     public entry fun deposit<ASSET: key+store>(msafe: &mut Momentum, asset: ASSET) {
         let asset_key = object::id(&asset);
@@ -363,10 +368,10 @@ module demo_msafe::msafe {
         let asset_key = object::id_from_address(asset_id);
         dynamic_object_field::remove(&mut msafe.id, asset_key)
     }
+
     /// if a ASSET exists in msafe
     public fun exist<ASSET: key+store>(msafe: &Momentum, asset_id: address): bool {
         let asset_key = object::id_from_address(asset_id);
         dynamic_object_field::exists_with_type<ID, ASSET>(&msafe.id, asset_key)
     }
-
 }

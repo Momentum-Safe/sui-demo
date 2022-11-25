@@ -1,7 +1,9 @@
-import {JsonRpcProvider, Provider, RawSigner} from "@mysten/sui.js";
+import {bcs, JsonRpcProvider, Provider, RawSigner} from "@mysten/sui.js";
 import {SuiContract} from "./contract";
 import {decodeStr} from "@mysten/bcs";
 import {Momentum, Transaction} from "./objects";
+import {PayloadType, PayloadTypeLiteral} from "./payload";
+import "./payload";
 
 export class MsafeContract extends SuiContract {
     connect(signer: RawSigner) {
@@ -20,9 +22,9 @@ export class MsafeContract extends SuiContract {
         return super.call('deposit_coin', [coin_typeT], [msafe, asset])
     }
 
-    async create_txn(msafe: string, nonce: bigint | string | number, type: bigint | string | number, payload: string, expiration: number) {
-        console.log(type, payload);
-        return super.call('create_txn', [], [msafe, nonce.toString(), type.toString(), payload, expiration]);
+    async create_txn(msafe: string, nonce: bigint | string | number, payloadType: PayloadType, payload: any, expiration: number) {
+        const payloadHex = '0x' + bcs.ser(PayloadTypeLiteral[payloadType], payload).toString('hex');
+        return super.call('create_txn', [], [msafe, nonce.toString(), payloadType, payloadHex, expiration]);
     }
 
     async confirm_txn(msafe: string, txid: string) {
@@ -55,5 +57,16 @@ export class MsafeContract extends SuiContract {
             const id = decodeStr((object.details as any).data.fields.name, 'base64');
             return {id, tx: (object.details as any).data.fields.value as Transaction}
         }).filter(({tx}) => tx != null);
+    }
+
+    static toMsafeTxID(creator: string, nonce: bigint | string | number):string {
+        const nonceBuf = Buffer.alloc(8);
+        nonceBuf.writeBigInt64LE(BigInt(nonce));
+        const prefix = creator.startsWith('0x')?'':'0x';
+        return `${prefix}${creator}${nonceBuf.toString('hex')}`;
+    }
+
+    static decodePayload(type: PayloadType, payloadData: string) {
+        return bcs.de(PayloadTypeLiteral[type], payloadData, 'base64');
     }
 }
