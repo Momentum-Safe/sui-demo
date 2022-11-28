@@ -45,10 +45,12 @@ module demo_msafe::msafe {
         // This parameter is updated when adding new transaction,
         // and is used in stale transaction pruning.
         max_sequence_number: u64,
+        // address+Priority=>(u64max-nonce)
         txids: PriorityQueue<address>,
         // A map from transaction payload hash to the Transaction information.
         // Storing the detailed information about the pending transaction, where
         // the index transaction hashes can be obtained from `tx_hashes`.
+        // key: address+nonce => txid
         pendings: Table<vector<u8>, Transaction>,
     }
 
