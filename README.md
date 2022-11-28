@@ -4,18 +4,18 @@ It can be used to manage arbitrary coins and any other assets, such as NFT.
 And it also supports modification of wallet permissions. 
 
 ## Installation
-1. install [sui] binary from release.
-2. install npm package: `yarn`
+1. Install [sui] binary from release.
+2. Install npm package: `yarn`
 
-## Start sui node with faucet
-`yarn faucet-node`
+## Start local sui node with faucet
+Run: `yarn faucet-node`
 
 ## Publish contract
-1. init sui client: `sui genesis`
-2. get default address: `sui client active-address`
-3. get coin from faucet: `yarn faucet $ACTIVE_ADDRESS`
-4. publish msafe code: `yarn msafe-cli publish`
-5. export msafe contract address: `export MSAFE=$ContractAddress`
+1. Init sui client: `sui genesis`
+2. Get default address: `sui client active-address`
+3. Get coin from faucet: `yarn faucet $ACTIVE_ADDRESS`
+4. Publish msafe code: `yarn msafe-cli publish`
+5. Export msafe contract address: `export MSAFE=$ContractAddress`
 
 ## Msafe CLI
 CLI tools to interact with msafe contract.
@@ -223,6 +223,6 @@ Options:
 ```
 
 ## Integrate Test
-run `yarn ts scripts/integrate_test.ts`
+Run `yarn ts scripts/integrate_test.ts`
 
 [sui]: https://github.com/MystenLabs/sui/releases
